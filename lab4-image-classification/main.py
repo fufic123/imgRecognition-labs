@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras import layers, models
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score, classification_report
+from tensorflow.keras import regularizers
 
 OUT = os.path.join(os.path.dirname(__file__), "output")
 
@@ -90,32 +91,50 @@ savefig("step2_augmentation_samples.png", fig)
 # ── Step 3: Build CNN model ───────────────────────────────────────────────────
 print("\n[Step 3] Building CNN model")
 
+l2 = regularizers.l2(1e-4)
+
 model = models.Sequential([
     # Augmentation (applied only during training)
     augment,
 
-    # Block 1 — 'same' padding keeps spatial size
-    layers.Conv2D(32, (3, 3), padding="same", activation="relu", input_shape=(32, 32, 3)),
-    layers.Conv2D(32, (3, 3), padding="same", activation="relu"),
+    # Block 1 — 'same' padding keeps spatial size; BN before activation
+    layers.Conv2D(64, (3, 3), padding="same", use_bias=False, kernel_regularizer=l2,
+                  input_shape=(32, 32, 3)),
+    layers.BatchNormalization(),
+    layers.Activation("relu"),
+    layers.Conv2D(64, (3, 3), padding="same", use_bias=False, kernel_regularizer=l2),
+    layers.BatchNormalization(),
+    layers.Activation("relu"),
     layers.MaxPooling2D((2, 2)),
-    layers.Dropout(0.25),
+    layers.Dropout(0.3),
 
     # Block 2 — 'valid' padding reduces spatial size
-    layers.Conv2D(64, (3, 3), padding="valid", activation="relu"),
-    layers.Conv2D(64, (3, 3), padding="same", activation="relu"),
+    layers.Conv2D(128, (3, 3), padding="valid", use_bias=False, kernel_regularizer=l2),
+    layers.BatchNormalization(),
+    layers.Activation("relu"),
+    layers.Conv2D(128, (3, 3), padding="same", use_bias=False, kernel_regularizer=l2),
+    layers.BatchNormalization(),
+    layers.Activation("relu"),
     layers.MaxPooling2D((2, 2)),
-    layers.Dropout(0.25),
+    layers.Dropout(0.3),
 
     # Block 3
-    layers.Conv2D(128, (3, 3), padding="same", activation="relu"),
+    layers.Conv2D(256, (3, 3), padding="same", use_bias=False, kernel_regularizer=l2),
+    layers.BatchNormalization(),
+    layers.Activation("relu"),
+    layers.Conv2D(256, (3, 3), padding="same", use_bias=False, kernel_regularizer=l2),
+    layers.BatchNormalization(),
+    layers.Activation("relu"),
     layers.MaxPooling2D((2, 2)),
     layers.Dropout(0.4),
 
     # Classifier head
     layers.Flatten(),
-    layers.Dense(256, activation="relu"),
+    layers.Dense(512, use_bias=False, kernel_regularizer=l2),
+    layers.BatchNormalization(),
+    layers.Activation("relu"),
     layers.Dropout(0.5),
-    layers.Dense(128, activation="relu"),
+    layers.Dense(256, activation="relu", kernel_regularizer=l2),
     layers.Dense(10, activation="softmax"),
 ], name="cifar10_cnn")
 
@@ -149,11 +168,19 @@ model.compile(
     metrics=["accuracy"]
 )
 
+callbacks = [
+    tf.keras.callbacks.ReduceLROnPlateau(
+        monitor="val_loss", factor=0.5, patience=4, min_lr=1e-6, verbose=1),
+    tf.keras.callbacks.EarlyStopping(
+        monitor="val_loss", patience=10, restore_best_weights=True, verbose=1),
+]
+
 history = model.fit(
     x_train_n, y_train,
-    epochs=20,
+    epochs=50,
     batch_size=64,
     validation_split=0.1,
+    callbacks=callbacks,
     verbose=1
 )
 
